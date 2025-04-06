@@ -152,6 +152,86 @@ class ClientesDB {
     });
   }
 
+  async marcarComoConcluido(id) {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['agendamentos'], 'readwrite');
+      const store = transaction.objectStore('agendamentos');
+      const request = store.get(id);
+
+      request.onsuccess = (event) => {
+        const agendamento = event.target.result;
+        if (agendamento) {
+          agendamento.concluido = true;
+          const updateRequest = store.put(agendamento);
+          updateRequest.onsuccess = () => {
+            resolve(true);
+          };
+          updateRequest.onerror = (error) => {
+            reject(error);
+          };
+        } else {
+          reject(new Error('Agendamento não encontrado'));
+        }
+      };
+
+      request.onerror = (event) => {
+        reject(event.target.error);
+      };
+    });
+  }
+
+  async excluirAgendamento(id) {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['agendamentos'], 'readwrite');
+      const store = transaction.objectStore('agendamentos');
+      const request = store.delete(id);
+
+      request.onsuccess = () => {
+        resolve(true);
+      };
+
+      request.onerror = (event) => {
+        reject(event.target.error);
+      };
+    });
+  }
+
+  async getAgendamento(id) {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['agendamentos'], 'readonly');
+      const store = transaction.objectStore('agendamentos');
+      const request = store.get(id);
+
+      request.onsuccess = (event) => {
+        resolve(event.target.result);
+      };
+
+      request.onerror = (event) => {
+        reject(event.target.error);
+      };
+    });
+  }
+
+  async atualizarAgendamento(agendamento) {
+    await this.init();
+    return new Promise((resolve, reject) => {
+      const transaction = this.db.transaction(['agendamentos'], 'readwrite');
+      const store = transaction.objectStore('agendamentos');
+      const request = store.put(agendamento);
+
+      request.onsuccess = () => {
+        resolve(true);
+      };
+
+      request.onerror = (event) => {
+        reject(event.target.error);
+      };
+    });
+  }
+
   async exportarBackup() {
     await this.init();
     const clientes = await this.getClientes();
@@ -299,6 +379,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Fechar sidebar em dispositivos móveis
     sidebar.classList.add('hidden');
+    modalOverlay.style.display = 'none'; // CORREÇÃO: Esconder overlay ao mudar de página
   }
   
   // Carregar agendamentos na dashboard
@@ -366,6 +447,64 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   
+  // Marcar agendamento como concluído
+  async function marcarComoConcluido(id) {
+    try {
+      await db.marcarComoConcluido(id);
+      carregarAgendamentos();
+    } catch (error) {
+      console.error('Erro ao marcar agendamento como concluído:', error);
+      alert('Erro ao marcar agendamento como concluído. Tente novamente.');
+    }
+  }
+  
+  // Excluir agendamento
+  async function excluirAgendamento(id) {
+    if (confirm('Tem certeza que deseja excluir este agendamento?')) {
+      try {
+        await db.excluirAgendamento(id);
+        carregarAgendamentos();
+      } catch (error) {
+        console.error('Erro ao excluir agendamento:', error);
+        alert('Erro ao excluir agendamento. Tente novamente.');
+      }
+    }
+  }
+  
+  // Editar agendamento
+  async function editarAgendamento(id) {
+    try {
+      const agendamento = await db.getAgendamento(id);
+      
+      if (!agendamento) {
+        alert('Agendamento não encontrado.');
+        return;
+      }
+      
+      // Preencher formulário com dados do agendamento
+      document.getElementById('client-name').value = agendamento.nomeCliente;
+      document.getElementById('client-phone').value = agendamento.telefone || '';
+      document.getElementById('appointment-date').value = agendamento.data;
+      document.getElementById('start-time').value = agendamento.horaInicio;
+      document.getElementById('end-time').value = agendamento.horaFim;
+      document.getElementById('service-value').value = agendamento.valor || '';
+      document.getElementById('notify').checked = agendamento.notificar;
+      
+      // Modificar o formulário para edição
+      const form = document.getElementById('appointment-form');
+      form.dataset.mode = 'edit';
+      form.dataset.id = id;
+      
+      // Mostrar modal
+      appointmentModal.style.display = 'block';
+      modalOverlay.style.display = 'block';
+      
+    } catch (error) {
+      console.error('Erro ao editar agendamento:', error);
+      alert('Erro ao editar agendamento. Tente novamente.');
+    }
+  }
+  
   // Carregar histórico
   async function carregarHistorico() {
     try {
@@ -416,6 +555,14 @@ document.addEventListener('DOMContentLoaded', () => {
   
   closeSidebarBtn.addEventListener('click', () => {
     sidebar.classList.add('hidden');
+    modalOverlay.style.display = 'none'; // CORREÇÃO: Esconder overlay ao fechar sidebar
+  });
+  
+  // CORREÇÃO: Fechar sidebar ao clicar no overlay
+  modalOverlay.addEventListener('click', () => {
+    sidebar.classList.add('hidden');
+    appointmentModal.style.display = 'none';
+    exportModal.style.display = 'none';
     modalOverlay.style.display = 'none';
   });
   
@@ -438,6 +585,8 @@ document.addEventListener('DOMContentLoaded', () => {
   addAppointmentBtn.addEventListener('click', () => {
     // Limpar formulário
     appointmentForm.reset();
+    appointmentForm.dataset.mode = 'add';
+    delete appointmentForm.dataset.id;
     
     // Definir data mínima como hoje
     const hoje = new Date().toISOString().split('T')[0];
@@ -470,35 +619,55 @@ document.addEventListener('DOMContentLoaded', () => {
     const notificar = document.getElementById('notify').checked;
     
     try {
-      // Verificar se o cliente já existe
-      const clientes = await db.getClientes();
-      let clienteId = null;
+      // Verificar se é edição ou novo agendamento
+      const isEdit = appointmentForm.dataset.mode === 'edit';
       
-      const clienteExistente = clientes.find(c => c.nome.toLowerCase() === nomeCliente.toLowerCase());
-      
-      if (clienteExistente) {
-        clienteId = clienteExistente.id;
+      if (isEdit) {
+        const id = parseInt(appointmentForm.dataset.id);
+        const agendamento = await db.getAgendamento(id);
+        
+        if (agendamento) {
+          agendamento.nomeCliente = nomeCliente;
+          agendamento.telefone = telefone;
+          agendamento.data = data;
+          agendamento.horaInicio = horaInicio;
+          agendamento.horaFim = horaFim;
+          agendamento.valor = valor;
+          agendamento.notificar = notificar;
+          
+          await db.atualizarAgendamento(agendamento);
+        }
       } else {
-        // Adicionar novo cliente
-        clienteId = await db.addCliente({
-          nome: nomeCliente,
-          telefone: telefone || ''
+        // Verificar se o cliente já existe
+        const clientes = await db.getClientes();
+        let clienteId = null;
+        
+        const clienteExistente = clientes.find(c => c.nome.toLowerCase() === nomeCliente.toLowerCase());
+        
+        if (clienteExistente) {
+          clienteId = clienteExistente.id;
+        } else {
+          // Adicionar novo cliente
+          clienteId = await db.addCliente({
+            nome: nomeCliente,
+            telefone: telefone || ''
+          });
+        }
+        
+        // Adicionar agendamento
+        await db.addAgendamento({
+          clienteId,
+          nomeCliente,
+          telefone,
+          data,
+          horaInicio,
+          horaFim,
+          valor,
+          notificar,
+          concluido: false,
+          dataCriacao: new Date().toISOString()
         });
       }
-      
-      // Adicionar agendamento
-      await db.addAgendamento({
-        clienteId,
-        nomeCliente,
-        telefone,
-        data,
-        horaInicio,
-        horaFim,
-        valor,
-        notificar,
-        concluido: false,
-        dataCriacao: new Date().toISOString()
-      });
       
       // Fechar modal e atualizar lista
       appointmentModal.style.display = 'none';
