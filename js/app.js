@@ -582,6 +582,10 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       sidebar.classList.remove('hidden');
       modalOverlay.style.display = 'block';
+      document.body.classList.add('sidebar-open');
+      
+      // Impedir que o overlay afete o menu lateral
+      e.stopImmediatePropagation();
     });
     
     closeSidebarBtn.addEventListener(eventType, (e) => {
@@ -591,6 +595,10 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       sidebar.classList.add('hidden');
       modalOverlay.style.display = 'none';
+      document.body.classList.remove('sidebar-open');
+      
+      // Impedir que o overlay afete o menu lateral
+      e.stopImmediatePropagation();
     });
     
     // Fechar sidebar ao clicar/tocar no overlay
@@ -599,10 +607,15 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         e.stopPropagation();
       }
-      sidebar.classList.add('hidden');
-      appointmentModal.style.display = 'none';
-      exportModal.style.display = 'none';
-      modalOverlay.style.display = 'none';
+      
+      // Verificar se o clique foi no overlay e não no sidebar
+      if (e.target === modalOverlay) {
+        sidebar.classList.add('hidden');
+        appointmentModal.style.display = 'none';
+        exportModal.style.display = 'none';
+        modalOverlay.style.display = 'none';
+        document.body.classList.remove('sidebar-open');
+      }
     });
   });
   
